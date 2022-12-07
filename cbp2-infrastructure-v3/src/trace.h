@@ -6,7 +6,8 @@
 // definitions.
 
 #define ZCAT            "/bin/gzip -dc"
-#define BZCAT           "/usr/bin/bzip2 -dc"
+#define BZCAT           "/bin/bzip2 -dc"
+#define XZCAT           "/usr/bin/xz -dc"
 #define CAT             "/bin/cat"
 
 struct trace {

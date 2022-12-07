@@ -14,6 +14,14 @@
 #include "predictor.h"
 #include "my_predictor.h"
 
+extern long long int trace_instructions, trace_branches;
+extern double instructions_per_branch;
+
+void print_stats (long long int dmiss, long long int tmiss) {
+	printf ("%lld instructions; %0.3f IPB; %0.3f direction MPKI; %0.3f indirect MPKI\n", trace_instructions, instructions_per_branch, 1000.0 * (dmiss / (double) trace_instructions), 1000.0 * (tmiss / (double) trace_instructions));
+	fflush (stdout);
+}
+
 int main (int argc, char *argv[]) {
 
 	// make sure there is one parameter
@@ -34,10 +42,9 @@ int main (int argc, char *argv[]) {
 	// some statistics to keep, currently just for conditional branches
 
 	long long int 
+		last_instructions = 0,
 		tmiss = 0, 	// number of target mispredictions
 		dmiss = 0; 	// number of direction mispredictions
-
-	// keep looping until end of file
 
 	for (;;) {
 
@@ -56,11 +63,19 @@ int main (int argc, char *argv[]) {
 		// collect statistics for a conditional branch trace
 
 		if (t->bi.br_flags & BR_CONDITIONAL) {
+			unsigned int z = t->bi.address;
+			//printf ("%x\n", z);
+			z &= 0x7fffffff;
+			if (t->taken) z |= 0x80000000;
 
 			// count a direction misprediction
 
 			dmiss += u->direction_prediction () != t->taken;
+		} 
 
+		// indirect branch prediction
+
+		if (t->bi.br_flags & BR_INDIRECT) {
 			// count a target misprediction
 
 			tmiss += u->target_prediction () != t->target;
@@ -69,6 +84,11 @@ int main (int argc, char *argv[]) {
 		// update competitor's state
 
 		p->update (u, t->taken, t->target);
+
+		if (trace_instructions - last_instructions > 100000000) {
+			print_stats (dmiss, tmiss);
+			last_instructions = trace_instructions;
+		}
 	}
 
 	// done reading traces
@@ -76,9 +96,14 @@ int main (int argc, char *argv[]) {
 	end_trace ();
 
 	// give final mispredictions per kilo-instruction and exit.
-	// each trace represents exactly 100 million instructions.
-
-	printf ("%0.3f MPKI\n", 1000.0 * (dmiss / 1e8));
+	// the original CBP2 traces have exactly 100,000,000 instructions.
+	// newer traces update the trace reader with their instruction count
+	if (trace_instructions == 0) {
+		trace_instructions = 100000000;
+		instructions_per_branch = trace_instructions / (double) trace_branches;
+	} else
+		trace_instructions = instructions_per_branch * trace_branches;
+	print_stats (dmiss, tmiss);
 	delete p;
 	exit (0);
 }

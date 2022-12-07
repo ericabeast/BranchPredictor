@@ -1,5 +1,5 @@
 /* 
-Code has been largely inspired  by the tagged PPM predictor simulator from Pierre Michaud, the OGEHL predictor simulator from by AndrÃ© Seznec, the TAGE predictor simulator from  AndrÃ© Seznec and Pierre Michaud
+Code has been largely inspired  by the tagged PPM predictor simulator from Pierre Michaud, the OGEHL predictor simulator from by André Seznec, the TAGE predictor simulator from  André Seznec and Pierre Michaud
 
 
 
@@ -16,7 +16,7 @@ Code has been largely inspired  by the tagged PPM predictor simulator from Pierr
 #define LOGG (LOGB-3)		// base 2 logarithm of number of entries  on each tagged component
 #define TBITS 7			// minimum tag width (shortest history length table)
 #define MINHIST 4		// shortest history length
-#define MAXHIST 640		// longest history lngth
+#define MAXHIST 640		// longest history length
 
 #define LOGL 8			//256 entries loop predictor
 #define WIDTHNBITERLOOP 14
@@ -75,17 +75,37 @@ public:
 };
 
 
-class my_predictor : public branch_predictor
+class my_predictor:public branch_predictor
 {
 public:
   branch_update u;
   branch_info bi;
 
-//  class lentry			//our predictor entry
+  class lentry			//loop predictor entry
+  {
+  public:
+    uint16_t NbIter;		//14 bits
+    uint8_t confid;		// 2 bits
+    uint16_t CurrentIter;	// 14 bits
+    uint16_t TAG;		// 14 bits
+    uint8_t age;		//8 bits
 
+
+    //52 bits per entry    
+      lentry ()
+    {
+      confid = 0;
+      CurrentIter = 0;
+      NbIter = 0;
+      TAG = 0;
+      age = 0;
+
+
+    }
+  };
 
   class bentry			// TAGE bimodal table entry  
-  {                     // base predictor
+  {
   public:
     int8_t hyst;
     int8_t pred;
@@ -94,11 +114,11 @@ public:
       pred = 0;
       hyst = 1;
     }
-  };//
+  };
 
 
   class gentry			// TAGE global table entry
-  {                     // other banks
+  {
   public:
     int8_t ctr;
     uint16_t tag;
@@ -134,7 +154,7 @@ public:
 
   folded_history ch_ios[NHIST + 1];	//utility for computing TAGE indices on kernel branches
   folded_history ch_tos[2][NHIST + 1];	//utility for computing TAGE tags on kernel branches
-  //lentry *ltable;		//loop predictor table
+  lentry *ltable;		//loop predictor table
   bentry *btable;		//bimodal TAGE table
   gentry *gtable[NHIST + 1];	// tagged TAGE tables
 
@@ -151,15 +171,24 @@ public:
   int HitBank;			// longest matching bank
   int AltBank;			// alternate matching bank
 
-  //bool predloop;		// our predictor parameter{}
+  bool predloop;		// loop predictor prediction
+  int LI;			//index of the loop predictor
+  int LHIT;			//hitting way in the loop predictor
+  int LTAG;			//tag on the loop predictor
+  bool LVALID;			// validity of the loop predictor prediction
+  int8_t WITHLOOP;		// counter to monitor whether or not loop prediction is beneficial
+
+
+
+
 
 
   my_predictor (void)
   {
     USE_ALT_ON_NA = 0;
     Seed = 0;
-    LOGTICK = 19;		//lg smooth resetting
-    TICK = (1 << (LOGTICK - 1));	//initog of the period for useful taialize the resetting counter to the half of the period
+    LOGTICK = 19;		//log of the period for useful tag smooth resetting
+    TICK = (1 << (LOGTICK - 1));	//initialize the resetting counter to the half of the period
     phist = 0;
     phistos = 0;
     GHIST = (uint8_t *) malloc(BUFFERHIST);
@@ -229,7 +258,7 @@ public:
 	ch_tos[1][i].init (ch_i[i].OLENGTH, TB[i] - 1);
       }
 //allocation of the loop predictor table
-//    ltable = new lentry[1 << LOGL];
+    ltable = new lentry[1 << LOGL];
 //allocation of the predictor tables
     btable = new bentry[1 << LOGB];
     for (int i = 1; i <= NHIST; i++)
@@ -237,6 +266,35 @@ public:
 	gtable[i] = new gentry[1 << (logg[i])];
       }
 
+//#define PRINTCHAR
+#ifdef PRINTCHAR
+//for printing predictor characteristics
+    int NBENTRY = 0;
+
+    int STORAGESIZE = 0;
+    for (int i = 1; i <= NHIST; i++)
+      {
+
+	fprintf (stderr, "%d ", TB[i]);
+
+	STORAGESIZE += (1 << logg[i]) * (5 + TB[i]);
+	NBENTRY += (1 << logg[i]);
+
+
+      } fprintf (stderr, "\n");
+    for (int i = 1; i <= NHIST; i++)
+      {
+	fprintf (stderr, "%d ", m[i]);
+
+      }
+    fprintf (stderr, "\n");
+    STORAGESIZE += (1 << LOGB) + (1 << (LOGB - HYSTSHIFT));
+    STORAGESIZE += (1 << LOGL) * (128 * WIDTHNBITERLOOP + 14 + 8 + 2);
+
+    fprintf (stderr,
+	     "NHIST= %d; MINHIST= %d; MAXHIST= %d; STORAGESIZE= %d; NBENTRY= %d\n",
+	     NHIST, MINHIST, MAXHIST, STORAGESIZE, NBENTRY);
+#endif
   }
 
 
@@ -343,9 +401,130 @@ public:
     btable[BI].pred = inter >> 1;
     btable[BI >> HYSTSHIFT].hyst = (inter & 1);
   }
+//loop prediction: only used if high confidence
+  bool getloop (address_t pc)
+  {
+    LHIT = -1;
 
-//our predictor and its update function 
- 
+    LI = lindex (pc);
+    LTAG = (pc >> (LOGL - 2)) & ((1 << 14) - 1);
+
+    for (int i = 0; i < 4; i++)
+      if (ltable[LI + i].TAG == LTAG)
+	{
+	  LHIT = i;
+	  LVALID = (ltable[LI + i].confid == 3);
+	  if (ltable[LI + i].CurrentIter + 1 == ltable[LI + i].NbIter)
+	    return false;
+	  else
+	    return true;
+	}
+    LVALID = false;
+    return (false);
+
+  }
+  void loopupdate (address_t pc, bool Taken)
+  {
+    if (LHIT >= 0)
+      {
+//already a hit 
+	if (LVALID)
+	  {
+	    if (Taken != predloop)
+	      {
+// free the entry
+		ltable[LI + LHIT].NbIter = 0;
+		ltable[LI + LHIT].age = 0;
+		ltable[LI + LHIT].confid = 0;
+		ltable[LI + LHIT].CurrentIter = 0;
+		return;
+
+	      }
+	    else if (predloop != tage_pred)
+	      if (ltable[LI + LHIT].age < 255)
+		ltable[LI + LHIT].age++;
+	  }
+
+
+	ltable[LI + LHIT].CurrentIter++;
+	ltable[LI + LHIT].CurrentIter &= ((1 << WIDTHNBITERLOOP) - 1);
+	//loop with more than 2**14 iterations are not treated correctly; but who cares :-)
+	if (ltable[LI + LHIT].CurrentIter > ltable[LI + LHIT].NbIter)
+	  {
+	    ltable[LI + LHIT].confid = 0;
+	    if (ltable[LI + LHIT].NbIter != 0)
+	      {
+// free the entry
+
+		ltable[LI + LHIT].NbIter = 0;
+		ltable[LI + LHIT].age = 0;
+		ltable[LI + LHIT].confid = 0;
+	      }
+	  }
+
+	if (Taken != true)
+	  {
+	    if (ltable[LI + LHIT].CurrentIter == ltable[LI + LHIT].NbIter)
+	      {
+		if (ltable[LI + LHIT].confid < 3)
+		  ltable[LI + LHIT].confid++;
+		if (ltable[LI + LHIT].NbIter < 3)
+		  //just do not predict when the loop count is 1 or 2     
+		  {
+// free the entry
+
+		    ltable[LI + LHIT].NbIter = 0;
+		    ltable[LI + LHIT].age = 0;
+		    ltable[LI + LHIT].confid = 0;
+		  }
+	      }
+
+	    else
+	      {
+		if (ltable[LI + LHIT].NbIter == 0)
+		  {
+// first complete nest;
+		    ltable[LI + LHIT].confid = 0;
+		    ltable[LI + LHIT].NbIter = ltable[LI + LHIT].CurrentIter;
+		  }
+		else
+		  {
+//not the same number of iterations as last time: free the entry
+
+		    ltable[LI + LHIT].NbIter = 0;
+		    ltable[LI + LHIT].age = 0;
+		    ltable[LI + LHIT].confid = 0;
+
+		  }
+	      }
+	    ltable[LI + LHIT].CurrentIter = 0;
+	  }
+
+      }
+    else if (Taken)		//try to allocate an entry on taken branch
+      {
+	for (int i = 0; i < 4; i++)
+	  {
+	    int LHIT = (Seed + i) & 3;
+	    if (ltable[LI + LHIT].age == 0)
+	      {
+		ltable[LI + LHIT].TAG = LTAG;
+		ltable[LI + LHIT].NbIter = 0;
+		ltable[LI + LHIT].age = 255;
+		ltable[LI + LHIT].confid = 0;
+		ltable[LI + LHIT].CurrentIter = 1;
+		break;
+
+	      }
+	    else
+	      ltable[LI + LHIT].age--;
+	  }
+
+
+      }
+
+  }
+
 
 //just a simple pseudo random number generator: a 2-bit counter, used to avoid ping-pong phenomenom on tagged entry allocations
 
@@ -447,8 +626,10 @@ public:
 	  }
 	//end TAGE prediction
 
-	//pred_taken = ((WITHLOOP >= 0) && (LVALID)) ? predloop : tage_pred;
-  pred_taken = tage_pred;
+	predloop = getloop (pc);	// loop prediction
+
+	pred_taken = ((WITHLOOP >= 0) && (LVALID)) ? predloop : tage_pred;
+
 
       }
     u.direction_prediction (pred_taken);
@@ -465,8 +646,12 @@ public:
       {
 
 
-// update our predictor here
+// first update the loop predictor
+	loopupdate (pc, taken);
 
+	if (LVALID)
+	  if (tage_pred != predloop)
+	    ctrupdate (WITHLOOP, (predloop == taken), 7);
 
 // TAGE UPDATE  
 	// try to allocate a  new entries only if prediction was wrong

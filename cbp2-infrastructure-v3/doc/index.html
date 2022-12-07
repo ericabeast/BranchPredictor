@@ -92,26 +92,26 @@ The code in <tt>my_predictor.h</tt> defines two classes:
 
 	<p>
 
-	<b>Note:</b> The driver program only reports mispredictions
-	for conditional branches, but it calls the branch predictor
+	<b>Note:</b> The driver program reports mispredictions only for
+	conditional and indirect branches, but it calls the branch predictor
 	<tt>predict</tt> and <tt>update</tt> methods on every branch.
 	That's because you might want to use the information in a the
-	stream of all branches, not just conditional branches, to help
-	you predict conditional branches.  You are not required to try to
-	predict these non-conditional branches.
+	stream of all branches, not just conditional and indirect branches,
+	to help you predict conditional and indirect branches.	You are
+	not required to try to predict these non-conditional branches.
 
 	</ul>
 
 <h3>The Traces</h3>
 Each of the distributed trace files represents the branches encountered
-during the execution of 100 million instructions from the corresponding
-benchmark.  The traces include branches executed during the execution of
-benchmark code, library code, and system activity such as page faults.
-After the traces are generated, they are compressed with a crazy scheme
-I came up with one day when I was procrastinating from doing "real" work.
-Then they are compressed with <tt>bzip2</tt>.  The compression scheme is
-lossless; the traces sent to your predictor are bit-for-bit identical to
-the traces collected from the running benchmarks.
+during the execution of from 100 million to over 1 billion instructions
+from the corresponding benchmark.  The traces include branches executed
+during the execution of benchmark code, library code, and system activity
+such as page faults.  After the traces are generated, they are compressed
+with a crazy scheme I came up with one day when I was procrastinating
+from doing "real" work.  Then they are compressed with <tt>xz</tt>.
+The compression scheme is lossless; the traces sent to your predictor are
+bit-for-bit identical to the traces collected from the running benchmarks.
 
 <h3>System Requirements</h3>
 This infrastructure has been tested on x86 hardware running Fedora Core 4 and
@@ -123,7 +123,7 @@ On a Pentium D 2.8 GHz system the <tt>run</tt> script with the unmodified
 <tt>my_predictor.h</tt> takes about one minute run.
 <p>
 This infrastructure uses a few commands that are present on
-most Unix systems.  If the pathnames for <tt>bzip2</tt> and/or
+most Unix systems.  If the pathnames for <tt>xz</tt> and/or
 <tt>gzip</tt> on your system are different from those in <a
 href="../src/trace.h"><tt>trace.h</tt></a> then please customize them.
 <p>
@@ -131,10 +131,9 @@ href="../src/trace.h"><tt>trace.h</tt></a> then please customize them.
 This is a preliminary version of the infrastructure that has been subjected
 to testing by several graduate students.  I do not claim that it is free of
 bugs.  "Use the Source, Luke."  I welcome your comments.  Please send them
-to: <a href="mailto:djimenez@cs.rutgers.edu">djimenez@cs.rutgers.edu</a>.
+to: <a href="mailto:djimenez@cse.tamu.edu">djimenez@cse.tamu.edu</a>.
 
 <p>
-This page was written by <a href="http://www.cs.rutgers.edu/~djimenez">Daniel
-A. Jim&eacute;nez</a>.
+This page was written by Daniel A. Jim&eacute;nez.
 </body>
 </html>

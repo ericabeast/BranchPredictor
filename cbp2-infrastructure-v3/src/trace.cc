@@ -32,7 +32,7 @@
 //
 // The input file is usually compressed either with gzip or bzip2 and this
 // file contains code to support reading from these formats by piping the
-// output of the decompressors.  However, this file s does another kind of
+// output of the decompressors.  However, this file does another kind of
 // decompression on the traces after they have been decompressed by gzip
 // or bzip2.  If the upper four bits of the first byte read are either
 // 0 or 8 then the byte indicates that the trace has been compressed
@@ -45,6 +45,9 @@
 // number of bytes to read at once from the decompressor
 
 #define BUFSIZE	10000
+
+long long int trace_instructions, trace_branches = 0;
+double instructions_per_branch = 4.0;
 
 // file pointer for the pipe from the decompressor
 
@@ -212,7 +215,7 @@ void update_remember (remember & me, remember *r, bool correct, int index) {
 
 // read a single trace from the file
 
-trace *read_trace (void) {
+trace *read_trace1 (void) {
 	static trace t;
 	bool ras_correct, ras_offby2, ras_offby3, correct;
 
@@ -413,15 +416,36 @@ trace *read_trace (void) {
 	return & t;
 }
 
+trace *read_trace (void) {
+top:
+	trace *t = read_trace1 ();
+	if (!t) return NULL;
+
+	// see if this is a pretend branch giving an instruction count
+
+	if (t->bi.address == 0) {
+		trace_instructions += t->target;
+		instructions_per_branch = trace_instructions / (double) trace_branches;
+		goto top;
+	}
+	trace_branches++;
+	return t;
+};
+
 // open the trace file for reading
 
 #define GZIP_MAGIC     "\037\213"
 #define BZIP2_MAGIC	"BZ"
+#define XZ_MAGIC	"\375\067"
 
 void init_trace (char *fname) {
 	const char *dc;
 	char s[2] = { 0, 0 };
 	char cmd[1000];
+
+	// no instructions so far
+
+	trace_instructions = 0;
 
 	// figure out the compression method from the magic number
 
@@ -429,12 +453,18 @@ void init_trace (char *fname) {
 	if (!f) {
 		perror (fname);
 	}
-	fread (s, 1, 2, f);
+	int n = fread (s, 1, 2, f);
 	fclose (f);
+	if (n != 2) {
+		fprintf (stderr, "\%s\": short file!\n", fname);
+		exit (1);
+	}
 	if (strncmp (s, GZIP_MAGIC, 2) == 0) 
 		dc = ZCAT;
 	else if (strncmp (s, BZIP2_MAGIC, 2) == 0)
 		dc = BZCAT;
+	else if (strncmp (s, XZ_MAGIC, 2) == 0)
+		dc = XZCAT;
 	else
 		dc = CAT;
 

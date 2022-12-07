@@ -319,7 +319,7 @@ trace *read_trace (void) {
 #define BZIP2_MAGIC	"BZ"
 
 void init_trace (char *fname) {
-	char *dc;
+	const char *dc;
 	char s[2] = { 0, 0 };
 	char cmd[1000];
 
